@@ -19,7 +19,11 @@ import com.google.api.core.ApiFuture;
 import com.google.api.core.ApiFutures;
 import com.google.api.core.SettableApiFuture;
 import com.google.api.gax.batching.BatchingSettings;
+import com.google.api.gax.core.NoCredentialsProvider;
+import com.google.api.gax.grpc.GrpcTransportChannel;
 import com.google.api.gax.retrying.RetrySettings;
+import com.google.api.gax.rpc.FixedTransportChannelProvider;
+import com.google.api.gax.rpc.TransportChannelProvider;
 import com.google.cloud.pubsub.v1.Publisher;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.ByteString;
@@ -53,6 +57,9 @@ import org.apache.kafka.connect.sink.SinkTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.threeten.bp.Duration;
+
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 
 /**
  * A {@link SinkTask} used by a {@link CloudPubSubSinkConnector} to write messages to <a
@@ -368,10 +375,24 @@ public class CloudPubSubSinkTask extends SinkTask {
 
   private void createPublisher() {
     ProjectTopicName fullTopic = ProjectTopicName.of(cpsProject, cpsTopic);
+
     com.google.cloud.pubsub.v1.Publisher.Builder builder =
-        com.google.cloud.pubsub.v1.Publisher.newBuilder(fullTopic)
-            .setCredentialsProvider(gcpCredentialsProvider)
-            .setBatchingSettings(
+        com.google.cloud.pubsub.v1.Publisher.newBuilder(fullTopic);
+
+    String emulatorHost = System.getenv("PUBSUB_EMULATOR_HOST");
+    if (emulatorHost != null) {
+        ManagedChannel channel = ManagedChannelBuilder.forTarget(emulatorHost)
+                                                      .usePlaintext()
+                                                      .build();
+        TransportChannelProvider channelProvider =
+            FixedTransportChannelProvider.create(GrpcTransportChannel.create(channel));
+        builder.setChannelProvider(channelProvider)
+               .setCredentialsProvider(NoCredentialsProvider.create());
+    } else {
+        builder.setCredentialsProvider(gcpCredentialsProvider);
+    }
+
+    builder.setBatchingSettings(
                 BatchingSettings.newBuilder()
                     .setDelayThreshold(Duration.ofMillis(maxDelayThresholdMs))
                     .setElementCountThreshold(maxBufferSize)
