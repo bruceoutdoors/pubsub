@@ -53,6 +53,8 @@ public class CloudPubSubSinkConnector extends SinkConnector {
   public static final String DEFAULT_MESSAGE_BODY_NAME = "cps_message_body";
   public static final String PUBLISH_KAFKA_METADATA = "metadata.publish";
   public static final String PUBLISH_KAFKA_HEADERS = "headers.publish";
+  public static final String PUBLISH_KAFKA_KEY = "key.publish";
+  public static final String KAFKA_VALUE_CONVERTER = "kafka.value.converter";
   private Map<String, String> props;
 
   @Override
@@ -155,6 +157,18 @@ public class CloudPubSubSinkConnector extends SinkConnector {
            false,
            Importance.MEDIUM,
            "When true, include any headers as attributes when a message is published to Cloud Pub/Sub.")
+        .define(
+          PUBLISH_KAFKA_KEY,
+          Type.BOOLEAN,
+          true,
+          Importance.MEDIUM,
+          "When true, include kafka key as attribute ('key') when a message is published to Cloud Pub/Sub.")
+        .define(
+            KAFKA_VALUE_CONVERTER,
+            Type.CLASS,
+            null,
+            Importance.MEDIUM,
+            "Converter applied kafka values in SinkRecords")
         .define(CPS_MESSAGE_BODY_NAME,
             Type.STRING,
             DEFAULT_MESSAGE_BODY_NAME,

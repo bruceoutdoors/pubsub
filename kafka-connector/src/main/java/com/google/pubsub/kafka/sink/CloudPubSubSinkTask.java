@@ -33,6 +33,7 @@ import com.google.pubsub.v1.ProjectTopicName;
 import com.google.pubsub.v1.PubsubMessage;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -54,6 +55,8 @@ import org.apache.kafka.connect.header.Header;
 import org.apache.kafka.connect.header.Headers;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
+import org.apache.kafka.connect.storage.Converter;
+import org.apache.kafka.connect.json.JsonConverter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.threeten.bp.Duration;
@@ -83,6 +86,8 @@ public class CloudPubSubSinkTask extends SinkTask {
   private int maxShutdownTimeoutMs;
   private boolean includeMetadata;
   private boolean includeHeaders;
+  private boolean includeKey;
+  private Converter valueConverter;
   private ConnectorCredentialsProvider gcpCredentialsProvider;
   private com.google.cloud.pubsub.v1.Publisher publisher;
 
@@ -130,9 +135,19 @@ public class CloudPubSubSinkTask extends SinkTask {
     messageBodyName = (String) validatedProps.get(CloudPubSubSinkConnector.CPS_MESSAGE_BODY_NAME);
     includeMetadata = (Boolean) validatedProps.get(CloudPubSubSinkConnector.PUBLISH_KAFKA_METADATA);
     includeHeaders = (Boolean) validatedProps.get(CloudPubSubSinkConnector.PUBLISH_KAFKA_HEADERS);
+    includeKey = (Boolean) validatedProps.get(CloudPubSubSinkConnector.PUBLISH_KAFKA_KEY);
     gcpCredentialsProvider = new ConnectorCredentialsProvider();
     String credentialsPath = (String) validatedProps.get(ConnectorUtils.GCP_CREDENTIALS_FILE_PATH_CONFIG);
     String credentialsJson = (String) validatedProps.get(ConnectorUtils.GCP_CREDENTIALS_JSON_CONFIG);
+    Class conv = (Class) validatedProps.get(CloudPubSubSinkConnector.KAFKA_VALUE_CONVERTER);
+    if (conv != null) {
+      try {
+        // TODO: Now I'm stuck because sinks do not have access to transforms
+        valueConverter = (Converter) conv.getDeclaredConstructor().newInstance();
+      } catch (Exception e) {
+        log.warn("Unable to create kafka value converter: " + e.toString());
+      }
+    }
     if (credentialsPath != null) {
       try {
         gcpCredentialsProvider.loadFromFile(credentialsPath);
@@ -159,8 +174,17 @@ public class CloudPubSubSinkTask extends SinkTask {
     for (SinkRecord record : sinkRecords) {
       log.trace("Received record: " + record.toString());
       Map<String, String> attributes = new HashMap<>();
-      ByteString value = handleValue(record.valueSchema(), record.value(), attributes);
-      if (record.key() != null) {
+      ByteString value;
+      if (valueConverter != null) {
+        JsonConverter js = new JsonConverter();
+        byte[] valueBlob = valueConverter.fromConnectData(record.topic(), record.valueSchema(), record.value());
+        if (valueBlob != null) {
+          value = ByteString.copyFrom(valueBlob);
+        }
+      } else {
+        value = handleValue(record.valueSchema(), record.value(), attributes);
+      }
+      if (includeKey && record.key() != null) {
         String key = record.key().toString();
         attributes.put(ConnectorUtils.CPS_MESSAGE_KEY_ATTRIBUTE, key);
       }
